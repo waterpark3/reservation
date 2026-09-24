@@ -259,7 +259,7 @@ function render(){
       return `
       <div class="guest${complete?' complete':''}">
         <div class="info">
-          <div class="name">${escapeHtml(g.name)}${g.source==='walkin'?'<span class="badge walkin">当日受付</span>':''}</div>
+          <div class="name">${escapeHtml(g.name)}${g.source==='walkin'?'<span class="badge walkin">当日受付</span>':''}${g.orphan?'<span class="badge">リスト外</span>':''}</div>
           <div class="sub">${escapeHtml(g.furigana||'')}${g.seats>1?`　予約${g.seats}名`:''}</div>
           <button type="button" class="memo-btn${g.memo?' has':''}" data-memo="${escapeHtml(g.id)}">${g.memo ? escapeHtml(g.memo) : (g.images.length ? '＋ メモを追加' : '＋ メモ・画像を追加')}</button>
           ${g.images.length ? `<div class="gthumbs">${g.images.map((src,i)=>`<img src="${src}" alt="" data-gid="${escapeHtml(g.id)}" data-idx="${i}">`).join('')}</div>` : ''}
@@ -447,19 +447,32 @@ async function handleImport(file){
       statusEl.textContent = 'インポートできるデータが見つかりませんでした。';
       return;
     }
-    // 再インポートしてもメモが消えないよう、公演回＋名前＋フリガナが一致する既存のメモを引き継ぐ
-    const memoKey = g => [g.performanceId, g.name, g.furigana].join('|');
-    const oldNotes = {};
-    guests.filter(g=>g.source==='reserved' && (g.memo || g.images.length)).forEach(g=>{
-      oldNotes[memoKey(g)] = {memo: g.memo, images: g.images};
+    // 再インポートしても入場状況・メモ・画像が消えないよう、
+    // 公演回＋名前＋フリガナが一致する既存の予約者のデータを引き継ぐ
+    const keyOf = g => [g.performanceId, g.name, g.furigana].join('|');
+    const oldReserved = guests.filter(g=>g.source==='reserved');
+    const pool = {};
+    oldReserved.forEach(g=>{ (pool[keyOf(g)] = pool[keyOf(g)] || []).push(g); });
+
+    const used = new Set();
+    const merged = newGuests.map((g,i)=>{
+      const old = (pool[keyOf(g)] || []).shift();
+      if(old){
+        used.add(old.id);
+        return normalizeGuest({...g, id: old.id, arrived: old.arrived, memo: old.memo, images: old.images});
+      }
+      return normalizeGuest({...g, id:'local-'+Date.now()+'-'+i});
     });
 
-    // 既存の予約データ（当日受付は除く）を入れ替える
-    guests = guests.filter(g=>g.source!=='reserved').concat(
-      newGuests.map((g,i)=>normalizeGuest({...g, ...(oldNotes[memoKey(g)] || {}), id:'local-'+Date.now()+'-'+i}))
-    );
+    // 新しいリストに見つからなくても、入場済み・メモ・画像のある予約者は残す
+    const kept = oldReserved
+      .filter(g=>!used.has(g.id) && (g.arrived>0 || g.memo || g.images.length))
+      .map(g=>({...g, orphan:true}));
+
+    guests = guests.filter(g=>g.source!=='reserved').concat(merged, kept);
     render();
-    statusEl.textContent = `${newGuests.length}件の予約を取り込みました。`;
+    statusEl.textContent = `${newGuests.length}件の予約を取り込みました。`
+      + (kept.length ? `新しいリストに無い${kept.length}件は、入場・メモ・画像の記録があるため残しています。` : '');
   }catch(err){
     console.error(err);
     statusEl.textContent = '読み込みに失敗しました。ファイル形式をご確認ください。';
