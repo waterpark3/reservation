@@ -62,8 +62,6 @@ section.block{border:1px solid var(--line); border-radius:6px; margin-bottom:14p
 .stepper .count b{color:var(--ok);}
 .check{display:flex; align-items:center; gap:8px; flex:0 0 auto; padding:6px 4px; font-size:14px; cursor:pointer;}
 .check input{width:26px; height:26px; margin:0; accent-color:var(--ok); cursor:pointer;}
-.waitlist{padding:10px 12px; font-size:14px; line-height:1.9;}
-.waitlist .chip{display:inline-block; border:1px solid var(--line); border-radius:4px; padding:1px 8px; margin:2px 4px 2px 0; font-size:12px;}
 .empty{padding:14px 12px; color:var(--sub); font-size:13px;}
 .fab-area{
   position:fixed; left:0; right:0; bottom:0; display:flex; gap:8px;
@@ -98,11 +96,6 @@ dialog::backdrop{background:rgba(0,0,0,.4);}
     <div class="card enter"><div class="num" id="enteredNum">0</div><div class="label">入場した人数</div></div>
     <div class="card wait"><div class="num" id="waitingNum">0</div><div class="label">未入場（予約あり）</div></div>
   </div>
-
-  <section class="block">
-    <h2>未入場の予約者</h2>
-    <div class="waitlist" id="waitlist"></div>
-  </section>
 
   <section class="block">
     <h2>予約者一覧</h2>
@@ -185,19 +178,6 @@ function render(){
   const waitingSeats = visible.filter(g=>g.source==='reserved').reduce((s,g)=>s+(g.seats-g.arrived),0);
   document.getElementById('enteredNum').textContent = enteredSeats;
   document.getElementById('waitingNum').textContent = waitingSeats;
-
-  // 未入場リスト（一部だけ来場した組は「残り◯名」で表示）
-  const waitGuests = visible.filter(g=>g.source==='reserved' && g.arrived < g.seats);
-  const waitlistEl = document.getElementById('waitlist');
-  if(waitGuests.length===0){
-    waitlistEl.innerHTML = '<div class="empty">未入場の予約者はいません</div>';
-  } else {
-    waitlistEl.innerHTML = waitGuests.map(g=>{
-      const remain = g.seats - g.arrived;
-      const label = g.arrived>0 ? `残り${remain}名` : (g.seats>1?`${g.seats}名`:'');
-      return `<span class="chip">${escapeHtml(g.name)}${label?`（${label}）`:''}</span>`;
-    }).join('');
-  }
 
   // 一覧
   const listEl = document.getElementById('guestList');
