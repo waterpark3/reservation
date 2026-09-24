@@ -130,16 +130,16 @@ dialog::backdrop{background:rgba(0,0,0,.4);}
 </div>
 
 <dialog id="walkinDialog">
-  <form class="dform" method="dialog" id="walkinForm">
+  <form class="dform" method="dialog" id="walkinForm" autocomplete="off">
     <h3>予約なしのお客様</h3>
     <label>お名前 *</label>
-    <input type="text" id="wName" required>
+    <input type="text" id="wName" name="wk_field_1" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required>
     <label>ふりがな *</label>
-    <input type="text" id="wFurigana" required>
+    <input type="text" id="wFurigana" name="wk_field_2" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required>
     <label>メールアドレス *</label>
-    <input type="email" id="wEmail" required>
+    <input type="text" id="wEmail" name="wk_field_3" inputmode="email" pattern="[^@\s]+@[^@\s]+\.[^@\s]+" title="メールアドレスの形式で入力してください" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required>
     <label>人数</label>
-    <input type="number" id="wSeats" value="1" min="1">
+    <input type="number" id="wSeats" name="wk_field_4" autocomplete="off" value="1" min="1">
     <label>公演回 *</label>
     <select id="wPerf" required></select>
     <label>メモ</label>
