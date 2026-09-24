@@ -133,6 +133,23 @@ let db = null, downloads = null;
 let guests = []; // {id, name, furigana, email, seats, performanceId, source, arrived}
 let currentTab = "";
 
+// ---- 端末内保存（共有DBに繋がっていない場合のリロード対策）----
+const LS_KEY = 'lexicon_entry_guests_v1';
+function saveLocal(){
+  if(db) return; // DB接続時はDB側が正
+  try{ localStorage.setItem(LS_KEY, JSON.stringify({guests, currentTab})); }
+  catch(e){ console.error(e); }
+}
+function loadLocal(){
+  try{
+    const s = localStorage.getItem(LS_KEY);
+    if(!s) return;
+    const o = JSON.parse(s);
+    guests = (o.guests || []).map(normalizeGuest);
+    currentTab = o.currentTab || "";
+  }catch(e){ console.error(e); }
+}
+
 // 予約人数のうち何名来たかを表す arrived を正規化する（旧データの checkedIn とも互換）
 function normalizeGuest(raw){
   const seats = raw.seats || 1;
@@ -223,6 +240,8 @@ function render(){
   const prevVal = sel.value;
   sel.innerHTML = perfs.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
   if(perfs.includes(prevVal)) sel.value = prevVal;
+
+  saveLocal();
 }
 
 function escapeHtml(s){
@@ -348,6 +367,7 @@ function subscribeGuests(){
     },
     err=>{
       console.error(err);
+      document.getElementById('importStatus').textContent = '共有データベースに接続できません。';
     }
   );
 }
@@ -367,6 +387,7 @@ async function init(){
   document.getElementById('walkinForm').addEventListener('submit', submitWalkin);
   document.getElementById('exportBtn').addEventListener('click', exportWalkins);
 
+  loadLocal();
   render();
 
   try{
