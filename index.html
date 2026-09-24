@@ -5,8 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Lexicon 入場者管理</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://www.gstatic.com/firebasejs/11.10.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore-compat.js"></script>
 <style>
 :root{
   --bg:#fff; --text:#111; --sub:#666; --line:#d9d9d9; --soft:#f5f5f5;
@@ -64,6 +62,8 @@ section.block{border:1px solid var(--line); border-radius:6px; margin-bottom:14p
 .stepper .count b{color:var(--ok);}
 .check{display:flex; align-items:center; gap:8px; flex:0 0 auto; padding:6px 4px; font-size:14px; cursor:pointer;}
 .check input{width:26px; height:26px; margin:0; accent-color:var(--ok); cursor:pointer;}
+.waitlist{padding:10px 12px; font-size:14px; line-height:1.9;}
+.waitlist .chip{display:inline-block; border:1px solid var(--line); border-radius:4px; padding:1px 8px; margin:2px 4px 2px 0; font-size:12px;}
 .empty{padding:14px 12px; color:var(--sub); font-size:13px;}
 .fab-area{
   position:fixed; left:0; right:0; bottom:0; display:flex; gap:8px;
@@ -100,6 +100,11 @@ dialog::backdrop{background:rgba(0,0,0,.4);}
   </div>
 
   <section class="block">
+    <h2>未入場の予約者</h2>
+    <div class="waitlist" id="waitlist"></div>
+  </section>
+
+  <section class="block">
     <h2>予約者一覧</h2>
     <div id="guestList"></div>
   </section>
@@ -131,42 +136,9 @@ dialog::backdrop{background:rgba(0,0,0,.4);}
 </dialog>
 
 <script>
-// ▼ Firebaseコンソール →「プロジェクトの設定」→「マイアプリ(ウェブ)」の値を貼り付けてください
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  appId: "YOUR_APP_ID"
-};
-
 let db = null, downloads = null;
-
-function initDb(){
-  if(!window.firebase || String(firebaseConfig.apiKey).startsWith('YOUR_')) return null;
-  try{
-    firebase.initializeApp(firebaseConfig);
-    return firebase.firestore();
-  }catch(e){ console.error(e); return null; }
-}
 let guests = []; // {id, name, furigana, email, seats, performanceId, source, arrived}
 let currentTab = "";
-
-// ---- 端末内保存（共有DBに繋がっていない場合のリロード対策）----
-const LS_KEY = 'lexicon_entry_guests_v1';
-function saveLocal(){
-  if(db) return; // DB接続時はDB側が正
-  try{ localStorage.setItem(LS_KEY, JSON.stringify({guests, currentTab})); }
-  catch(e){ console.error(e); }
-}
-function loadLocal(){
-  try{
-    const s = localStorage.getItem(LS_KEY);
-    if(!s) return;
-    const o = JSON.parse(s);
-    guests = (o.guests || []).map(normalizeGuest);
-    currentTab = o.currentTab || "";
-  }catch(e){ console.error(e); }
-}
 
 // 予約人数のうち何名来たかを表す arrived を正規化する（旧データの checkedIn とも互換）
 function normalizeGuest(raw){
@@ -214,6 +186,19 @@ function render(){
   document.getElementById('enteredNum').textContent = enteredSeats;
   document.getElementById('waitingNum').textContent = waitingSeats;
 
+  // 未入場リスト（一部だけ来場した組は「残り◯名」で表示）
+  const waitGuests = visible.filter(g=>g.source==='reserved' && g.arrived < g.seats);
+  const waitlistEl = document.getElementById('waitlist');
+  if(waitGuests.length===0){
+    waitlistEl.innerHTML = '<div class="empty">未入場の予約者はいません</div>';
+  } else {
+    waitlistEl.innerHTML = waitGuests.map(g=>{
+      const remain = g.seats - g.arrived;
+      const label = g.arrived>0 ? `残り${remain}名` : (g.seats>1?`${g.seats}名`:'');
+      return `<span class="chip">${escapeHtml(g.name)}${label?`（${label}）`:''}</span>`;
+    }).join('');
+  }
+
   // 一覧
   const listEl = document.getElementById('guestList');
   const sorted = [...visible].sort((a,b)=> (a.performanceId||'').localeCompare(b.performanceId||'') || ((a.arrived>=a.seats)-(b.arrived>=b.seats)));
@@ -258,8 +243,6 @@ function render(){
   const prevVal = sel.value;
   sel.innerHTML = perfs.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
   if(perfs.includes(prevVal)) sel.value = prevVal;
-
-  saveLocal();
 }
 
 function escapeHtml(s){
@@ -385,7 +368,6 @@ function subscribeGuests(){
     },
     err=>{
       console.error(err);
-      document.getElementById('importStatus').textContent = '共有データベースに接続できません。';
     }
   );
 }
@@ -405,15 +387,15 @@ async function init(){
   document.getElementById('walkinForm').addEventListener('submit', submitWalkin);
   document.getElementById('exportBtn').addEventListener('click', exportWalkins);
 
-  db = initDb();
-  if(db){
-    subscribeGuests(); // 共有DBに接続（全端末で同期）
-  } else {
-    loadLocal();       // 未設定時はこの端末内のみ保存
-    document.getElementById('importStatus').textContent = '共有DB未設定：この端末内にのみ保存されます。';
-  }
   render();
-  try{ downloads = await window.claude?.use?.('downloads'); }catch(e){ /* GitHub Pagesでは未使用 */ }
+
+  try{
+    db = await window.claude?.use?.('db');
+    downloads = await window.claude?.use?.('downloads');
+    if(db){ subscribeGuests(); }
+  }catch(e){
+    console.error(e);
+  }
 }
 document.addEventListener('DOMContentLoaded', init);
 </script>
