@@ -62,8 +62,6 @@ section.block{border:1px solid var(--line); border-radius:6px; margin-bottom:14p
 .stepper .count b{color:var(--ok);}
 .check{display:flex; align-items:center; gap:8px; flex:0 0 auto; padding:6px 4px; font-size:14px; cursor:pointer;}
 .check input{width:26px; height:26px; margin:0; accent-color:var(--ok); cursor:pointer;}
-.waitlist{padding:10px 12px; font-size:14px; line-height:1.9;}
-.waitlist .chip{display:inline-block; border:1px solid var(--line); border-radius:4px; padding:1px 8px; margin:2px 4px 2px 0; font-size:12px;}
 .empty{padding:14px 12px; color:var(--sub); font-size:13px;}
 .fab-area{
   position:fixed; left:0; right:0; bottom:0; display:flex; gap:8px;
@@ -100,11 +98,6 @@ dialog::backdrop{background:rgba(0,0,0,.4);}
   </div>
 
   <section class="block">
-    <h2>未入場の予約者</h2>
-    <div class="waitlist" id="waitlist"></div>
-  </section>
-
-  <section class="block">
     <h2>予約者一覧</h2>
     <div id="guestList"></div>
   </section>
@@ -136,9 +129,24 @@ dialog::backdrop{background:rgba(0,0,0,.4);}
 </dialog>
 
 <script>
-let db = null, downloads = null;
 let guests = []; // {id, name, furigana, email, seats, performanceId, source, arrived}
 let currentTab = "";
+
+// ---- 端末内保存（共有DBに繋がっていない場合のリロード対策）----
+const LS_KEY = 'lexicon_entry_guests_v1';
+function saveLocal(){
+  try{ localStorage.setItem(LS_KEY, JSON.stringify({guests, currentTab})); }
+  catch(e){ console.error(e); }
+}
+function loadLocal(){
+  try{
+    const s = localStorage.getItem(LS_KEY);
+    if(!s) return;
+    const o = JSON.parse(s);
+    guests = (o.guests || []).map(normalizeGuest);
+    currentTab = o.currentTab || "";
+  }catch(e){ console.error(e); }
+}
 
 // 予約人数のうち何名来たかを表す arrived を正規化する（旧データの checkedIn とも互換）
 function normalizeGuest(raw){
@@ -186,19 +194,6 @@ function render(){
   document.getElementById('enteredNum').textContent = enteredSeats;
   document.getElementById('waitingNum').textContent = waitingSeats;
 
-  // 未入場リスト（一部だけ来場した組は「残り◯名」で表示）
-  const waitGuests = visible.filter(g=>g.source==='reserved' && g.arrived < g.seats);
-  const waitlistEl = document.getElementById('waitlist');
-  if(waitGuests.length===0){
-    waitlistEl.innerHTML = '<div class="empty">未入場の予約者はいません</div>';
-  } else {
-    waitlistEl.innerHTML = waitGuests.map(g=>{
-      const remain = g.seats - g.arrived;
-      const label = g.arrived>0 ? `残り${remain}名` : (g.seats>1?`${g.seats}名`:'');
-      return `<span class="chip">${escapeHtml(g.name)}${label?`（${label}）`:''}</span>`;
-    }).join('');
-  }
-
   // 一覧
   const listEl = document.getElementById('guestList');
   const sorted = [...visible].sort((a,b)=> (a.performanceId||'').localeCompare(b.performanceId||'') || ((a.arrived>=a.seats)-(b.arrived>=b.seats)));
@@ -243,6 +238,8 @@ function render(){
   const prevVal = sel.value;
   sel.innerHTML = perfs.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
   if(perfs.includes(prevVal)) sel.value = prevVal;
+
+  saveLocal();
 }
 
 function escapeHtml(s){
@@ -250,17 +247,13 @@ function escapeHtml(s){
 }
 
 // 入場人数を更新する（0〜予約人数の範囲）
-async function setArrived(id, value){
+function setArrived(id, value){
   const g = guests.find(x=>x.id===id);
   if(!g) return;
   const next = Math.max(0, Math.min(g.seats, value));
   if(next === g.arrived) return;
-  g.arrived = next; // 楽観的更新
+  g.arrived = next;
   render();
-  if(db && !String(id).startsWith('local-')){
-    try{ await db.doc('guests/'+id).update({arrived: next, checkedIn: next >= g.seats}); }
-    catch(e){ console.error(e); /* 失敗時は購読が正しい状態に戻す */ }
-  }
 }
 
 async function handleImport(file){
@@ -293,17 +286,11 @@ async function handleImport(file){
       statusEl.textContent = 'インポートできるデータが見つかりませんでした。';
       return;
     }
-    if(db){
-      // 既存の予約データ（当日受付は除く）を入れ替える
-      const oldReserved = guests.filter(g=>g.source==='reserved');
-      for(const g of oldReserved){ await db.doc('guests/'+g.id).delete(); }
-      for(const g of newGuests){ await db.collection('guests').add(g); }
-    } else {
-      guests = guests.filter(g=>g.source!=='reserved').concat(
-        newGuests.map((g,i)=>normalizeGuest({...g, id:'local-'+Date.now()+'-'+i}))
-      );
-      render();
-    }
+    // 既存の予約データ（当日受付は除く）を入れ替える
+    guests = guests.filter(g=>g.source!=='reserved').concat(
+      newGuests.map((g,i)=>normalizeGuest({...g, id:'local-'+Date.now()+'-'+i}))
+    );
+    render();
     statusEl.textContent = `${newGuests.length}件の予約を取り込みました。`;
   }catch(err){
     console.error(err);
@@ -311,7 +298,7 @@ async function handleImport(file){
   }
 }
 
-async function submitWalkin(e){
+function submitWalkin(e){
   e.preventDefault();
   const name = document.getElementById('wName').value.trim();
   if(!name) return;
@@ -325,19 +312,14 @@ async function submitWalkin(e){
     source: 'walkin',
     arrived: seats,
   };
-  if(db){
-    try{ await db.collection('guests').add(g); }
-    catch(err){ console.error(err); alert('登録に失敗しました'); return; }
-  } else {
-    guests.push(normalizeGuest({...g, id:'local-'+Date.now()}));
-    render();
-  }
+  guests.push(normalizeGuest({...g, id:'local-'+Date.now()}));
+  render();
   document.getElementById('walkinDialog').close();
   document.getElementById('walkinForm').reset();
   document.getElementById('wSeats').value = 1;
 }
 
-async function exportWalkins(){
+function exportWalkins(){
   const walkins = guests.filter(g=>g.source==='walkin');
   if(walkins.length===0){ alert('当日受付のデータがまだありません。'); return; }
   const rows = walkins.map(g=>({
@@ -349,30 +331,13 @@ async function exportWalkins(){
   XLSX.utils.book_append_sheet(wb, ws, '当日受付');
   const arrbuf = XLSX.write(wb, {bookType:'xlsx', type:'array'});
   const blob = new Blob([arrbuf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-  if(downloads){
-    try{ await downloads.save({filename:'当日受付リスト.xlsx', data: blob}); }
-    catch(err){ console.error(err); alert('保存できませんでした。'); }
-  } else {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = '当日受付リスト.xlsx'; a.click();
-    URL.revokeObjectURL(url);
-  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = '当日受付リスト.xlsx'; a.click();
+  URL.revokeObjectURL(url);
 }
 
-function subscribeGuests(){
-  db.collection('guests').onSnapshot(
-    snap=>{
-      guests = snap.docs.map(d=>normalizeGuest({id:d.id, ...d.data()}));
-      render();
-    },
-    err=>{
-      console.error(err);
-    }
-  );
-}
-
-async function init(){
+function init(){
   document.getElementById('importBtn').addEventListener('click', ()=>document.getElementById('fileInput').click());
   document.getElementById('fileInput').addEventListener('change', e=>{
     if(e.target.files[0]) handleImport(e.target.files[0]);
@@ -387,15 +352,9 @@ async function init(){
   document.getElementById('walkinForm').addEventListener('submit', submitWalkin);
   document.getElementById('exportBtn').addEventListener('click', exportWalkins);
 
+  loadLocal();
+  document.getElementById('importStatus').textContent = 'データはこの端末のブラウザ内に保存されます。';
   render();
-
-  try{
-    db = await window.claude?.use?.('db');
-    downloads = await window.claude?.use?.('downloads');
-    if(db){ subscribeGuests(); }
-  }catch(e){
-    console.error(e);
-  }
 }
 document.addEventListener('DOMContentLoaded', init);
 </script>
