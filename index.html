@@ -59,6 +59,14 @@ section.block{border:1px solid var(--line); border-radius:6px; margin-bottom:14p
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .memo-btn.has{color:var(--text);}
+.gthumbs{display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;}
+.gthumbs img{width:40px; height:40px; object-fit:cover; border-radius:4px; display:block; cursor:pointer;}
+.thumbs{display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 8px;}
+.thumbs:empty{display:none;}
+.thumb{position:relative; width:76px; height:76px;}
+.thumb img{width:100%; height:100%; object-fit:cover; border-radius:6px; display:block; cursor:pointer;}
+.thumb .rm{position:absolute; top:-6px; right:-6px; width:22px; height:22px; border-radius:50%; border:none; background:var(--ink); color:#fff; font-size:14px; line-height:1; cursor:pointer;}
+#imgView{width:100%; height:auto; max-height:75vh; object-fit:contain; display:block;}
 .stepper{display:flex; align-items:center; gap:6px; flex:0 0 auto;}
 .stepper button{
   width:32px; height:32px; border-radius:6px; border:1px solid var(--line);
@@ -147,6 +155,10 @@ dialog::backdrop{background:rgba(0,0,0,.4);}
   <form class="dform" method="dialog" id="memoForm">
     <h3 id="memoTitle">メモ</h3>
     <textarea id="memoText" rows="5" placeholder="例：車椅子席を希望、開演に遅れて来場予定"></textarea>
+    <label>画像（最大5枚）</label>
+    <div class="thumbs" id="memoImages"></div>
+    <button type="button" class="btn" id="addImgBtn">画像を追加</button>
+    <input type="file" id="imgInput" accept="image/*" multiple>
     <div class="actions">
       <button type="button" class="btn" id="memoCancel">キャンセル</button>
       <button type="submit" class="btn primary">保存する</button>
@@ -154,16 +166,30 @@ dialog::backdrop{background:rgba(0,0,0,.4);}
   </form>
 </dialog>
 
+<dialog id="imgDialog">
+  <div class="dform">
+    <img id="imgView" alt="">
+    <div class="actions"><button type="button" class="btn" id="imgClose">閉じる</button></div>
+  </div>
+</dialog>
+
 <script>
-let guests = []; // {id, name, furigana, email, seats, performanceId, source, arrived, memo}
+let guests = []; // {id, name, furigana, email, seats, performanceId, source, arrived, memo, images[]}
 let currentTab = "";
 let memoTargetId = null;
 
 // ---- 端末内保存（共有DBに繋がっていない場合のリロード対策）----
 const LS_KEY = 'lexicon_entry_guests_v1';
+let saveWarned = false;
 function saveLocal(){
-  try{ localStorage.setItem(LS_KEY, JSON.stringify({guests, currentTab})); }
-  catch(e){ console.error(e); }
+  try{ localStorage.setItem(LS_KEY, JSON.stringify({guests, currentTab})); saveWarned = false; }
+  catch(e){
+    console.error(e);
+    if(!saveWarned){
+      saveWarned = true;
+      alert('端末の保存容量がいっぱいです。画像を減らすか、不要なデータを削除してください。');
+    }
+  }
 }
 function loadLocal(){
   try{
@@ -184,7 +210,7 @@ function normalizeGuest(raw){
     arrived = raw.checkedIn ? seats : 0;
   }
   arrived = Math.max(0, Math.min(seats, arrived));
-  return {...raw, seats, arrived, memo: raw.memo || ''};
+  return {...raw, seats, arrived, memo: raw.memo || '', images: Array.isArray(raw.images) ? raw.images : []};
 }
 
 function extractSeats(text){
@@ -235,7 +261,8 @@ function render(){
         <div class="info">
           <div class="name">${escapeHtml(g.name)}${g.source==='walkin'?'<span class="badge walkin">当日受付</span>':''}</div>
           <div class="sub">${escapeHtml(g.furigana||'')}${g.seats>1?`　予約${g.seats}名`:''}</div>
-          <button type="button" class="memo-btn${g.memo?' has':''}" data-memo="${escapeHtml(g.id)}">${g.memo ? escapeHtml(g.memo) : '＋ メモを追加'}</button>
+          <button type="button" class="memo-btn${g.memo?' has':''}" data-memo="${escapeHtml(g.id)}">${g.memo ? escapeHtml(g.memo) : (g.images.length ? '＋ メモを追加' : '＋ メモ・画像を追加')}</button>
+          ${g.images.length ? `<div class="gthumbs">${g.images.map((src,i)=>`<img src="${src}" alt="" data-gid="${escapeHtml(g.id)}" data-idx="${i}">`).join('')}</div>` : ''}
         </div>
         ${g.seats>1 ? `
         <div class="stepper">
@@ -273,6 +300,13 @@ function render(){
     listEl.querySelectorAll('.memo-btn').forEach(btn=>{
       btn.addEventListener('click', e=>openMemo(e.currentTarget.dataset.memo));
     });
+    listEl.querySelectorAll('.gthumbs img').forEach(im=>{
+      im.addEventListener('click', e=>{
+        const g = guests.find(x=>x.id===e.currentTarget.dataset.gid);
+        const src = g && g.images[parseInt(e.currentTarget.dataset.idx,10)];
+        if(src) openViewer(src);
+      });
+    });
   }
 
   // ウォークインフォームの公演回選択肢
@@ -303,18 +337,84 @@ function openMemo(id){
   const g = guests.find(x=>x.id===id);
   if(!g) return;
   memoTargetId = id;
-  document.getElementById('memoTitle').textContent = `メモ：${g.name}`;
+  memoDraftImages = [...g.images];
+  document.getElementById('memoTitle').textContent = `メモ・画像：${g.name}`;
   document.getElementById('memoText').value = g.memo || '';
+  renderMemoImages();
   document.getElementById('memoDialog').showModal();
 }
 
 function submitMemo(e){
   e.preventDefault();
   const g = guests.find(x=>x.id===memoTargetId);
-  if(g) g.memo = document.getElementById('memoText').value.trim();
+  if(g){
+    g.memo = document.getElementById('memoText').value.trim();
+    g.images = [...memoDraftImages];
+  }
   memoTargetId = null;
+  memoDraftImages = [];
   document.getElementById('memoDialog').close();
   render();
+}
+
+// ---- 画像 ----
+const MAX_IMAGES = 5;
+let memoDraftImages = [];
+
+// 端末の保存容量を節約するため、長辺900pxのJPEGに縮小して保存する
+function readImage(file, maxSide=900, quality=0.75){
+  return new Promise((resolve, reject)=>{
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = ()=>{
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * scale);
+      c.height = Math.round(img.height * scale);
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('image load failed')); };
+    img.src = url;
+  });
+}
+
+function renderMemoImages(){
+  const el = document.getElementById('memoImages');
+  el.innerHTML = memoDraftImages.map((src,i)=>
+    `<div class="thumb"><img src="${src}" alt="" data-idx="${i}"><button type="button" class="rm" data-rm="${i}" aria-label="画像を削除">×</button></div>`
+  ).join('');
+  el.querySelectorAll('img').forEach(im=>{
+    im.addEventListener('click', e=>openViewer(memoDraftImages[parseInt(e.currentTarget.dataset.idx,10)]));
+  });
+  el.querySelectorAll('.rm').forEach(b=>{
+    b.addEventListener('click', e=>{
+      memoDraftImages.splice(parseInt(e.currentTarget.dataset.rm,10), 1);
+      renderMemoImages();
+    });
+  });
+}
+
+async function addImages(files){
+  for(const f of files){
+    if(memoDraftImages.length >= MAX_IMAGES){
+      alert(`画像は1人につき${MAX_IMAGES}枚までです。`);
+      break;
+    }
+    try{ memoDraftImages.push(await readImage(f)); }
+    catch(err){ console.error(err); alert('画像を読み込めませんでした。'); }
+  }
+  renderMemoImages();
+}
+
+function openViewer(src){
+  if(!src) return;
+  document.getElementById('imgView').src = src;
+  document.getElementById('imgDialog').showModal();
 }
 
 async function handleImport(file){
@@ -349,12 +449,14 @@ async function handleImport(file){
     }
     // 再インポートしてもメモが消えないよう、公演回＋名前＋フリガナが一致する既存のメモを引き継ぐ
     const memoKey = g => [g.performanceId, g.name, g.furigana].join('|');
-    const oldMemos = {};
-    guests.filter(g=>g.source==='reserved' && g.memo).forEach(g=>{ oldMemos[memoKey(g)] = g.memo; });
+    const oldNotes = {};
+    guests.filter(g=>g.source==='reserved' && (g.memo || g.images.length)).forEach(g=>{
+      oldNotes[memoKey(g)] = {memo: g.memo, images: g.images};
+    });
 
     // 既存の予約データ（当日受付は除く）を入れ替える
     guests = guests.filter(g=>g.source!=='reserved').concat(
-      newGuests.map((g,i)=>normalizeGuest({...g, memo: oldMemos[memoKey(g)] || '', id:'local-'+Date.now()+'-'+i}))
+      newGuests.map((g,i)=>normalizeGuest({...g, ...(oldNotes[memoKey(g)] || {}), id:'local-'+Date.now()+'-'+i}))
     );
     render();
     statusEl.textContent = `${newGuests.length}件の予約を取り込みました。`;
@@ -396,7 +498,7 @@ function exportWalkins(){
   if(walkins.length===0){ alert('当日受付のデータがまだありません。'); return; }
   const rows = walkins.map(g=>({
     'お名前': g.name, 'フリガナ': g.furigana, 'メールアドレス': g.email,
-    '人数': g.seats, '公演回': g.performanceId, 'メモ': g.memo || '',
+    '人数': g.seats, '公演回': g.performanceId, 'メモ': g.memo || '', '画像枚数': g.images.length,
   }));
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
@@ -424,8 +526,16 @@ function init(){
   document.getElementById('walkinForm').addEventListener('submit', submitWalkin);
   document.getElementById('memoCancel').addEventListener('click', ()=>{
     memoTargetId = null;
+    memoDraftImages = [];
     document.getElementById('memoDialog').close();
   });
+  document.getElementById('addImgBtn').addEventListener('click', ()=>document.getElementById('imgInput').click());
+  document.getElementById('imgInput').addEventListener('change', e=>{
+    const files = [...e.target.files];
+    e.target.value = '';
+    if(files.length) addImages(files);
+  });
+  document.getElementById('imgClose').addEventListener('click', ()=>document.getElementById('imgDialog').close());
   document.getElementById('memoForm').addEventListener('submit', submitMemo);
   document.getElementById('exportBtn').addEventListener('click', exportWalkins);
   document.getElementById('clearWalkinBtn').addEventListener('click', ()=>{
