@@ -52,6 +52,13 @@ section.block{border:1px solid var(--line); border-radius:6px; margin-bottom:14p
 .badge.walkin{background:var(--ink); color:#fff; border-color:var(--ink);}
 .guest.complete{background:var(--soft);}
 .guest.complete .name{color:var(--sub);}
+.memo-btn{
+  display:block; max-width:100%; margin-top:2px; padding:4px 0;
+  border:none; background:none;
+  color:var(--sub); font:inherit; font-size:12px; text-align:left; cursor:pointer;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.memo-btn.has{color:var(--text);}
 .stepper{display:flex; align-items:center; gap:6px; flex:0 0 auto;}
 .stepper button{
   width:32px; height:32px; border-radius:6px; border:1px solid var(--line);
@@ -73,12 +80,13 @@ section.block{border:1px solid var(--line); border-radius:6px; margin-bottom:14p
 dialog{border:none; border-radius:8px; padding:0; max-width:420px; width:92vw; background:var(--bg); color:var(--text);}
 dialog::backdrop{background:rgba(0,0,0,.4);}
 .dform{padding:18px;}
-.dform h3{margin:0 0 12px; font-size:16px;}
+.dform h3{margin:0 0 12px; font-size:16px; overflow-wrap:anywhere;}
 .dform label{display:block; font-size:12px; color:var(--sub); margin:10px 0 4px;}
-.dform input, .dform select{
+.dform input, .dform select, .dform textarea{
   width:100%; padding:9px 10px; border-radius:6px; border:1px solid var(--line);
-  background:var(--bg); color:var(--text); font-size:15px;
+  background:var(--bg); color:var(--text); font-size:15px; font-family:inherit;
 }
+.dform textarea{resize:vertical; min-height:110px;}
 .dform .actions{display:flex; justify-content:flex-end; gap:8px; margin-top:16px;}
 .status{font-size:12px; color:var(--sub); text-align:center; margin-top:8px;}
 </style>
@@ -126,6 +134,8 @@ dialog::backdrop{background:rgba(0,0,0,.4);}
     <input type="number" id="wSeats" value="1" min="1">
     <label>公演回 *</label>
     <select id="wPerf" required></select>
+    <label>メモ</label>
+    <textarea id="wMemo" rows="2"></textarea>
     <div class="actions">
       <button type="button" class="btn" id="wCancel">キャンセル</button>
       <button type="submit" class="btn primary">登録する</button>
@@ -133,9 +143,21 @@ dialog::backdrop{background:rgba(0,0,0,.4);}
   </form>
 </dialog>
 
+<dialog id="memoDialog">
+  <form class="dform" method="dialog" id="memoForm">
+    <h3 id="memoTitle">メモ</h3>
+    <textarea id="memoText" rows="5" placeholder="例：車椅子席を希望、開演に遅れて来場予定"></textarea>
+    <div class="actions">
+      <button type="button" class="btn" id="memoCancel">キャンセル</button>
+      <button type="submit" class="btn primary">保存する</button>
+    </div>
+  </form>
+</dialog>
+
 <script>
-let guests = []; // {id, name, furigana, email, seats, performanceId, source, arrived}
+let guests = []; // {id, name, furigana, email, seats, performanceId, source, arrived, memo}
 let currentTab = "";
+let memoTargetId = null;
 
 // ---- 端末内保存（共有DBに繋がっていない場合のリロード対策）----
 const LS_KEY = 'lexicon_entry_guests_v1';
@@ -154,6 +176,7 @@ function loadLocal(){
 }
 
 // 予約人数のうち何名来たかを表す arrived を正規化する（旧データの checkedIn とも互換）
+// memo は旧データに無い場合は空文字にする
 function normalizeGuest(raw){
   const seats = raw.seats || 1;
   let arrived = raw.arrived;
@@ -161,7 +184,7 @@ function normalizeGuest(raw){
     arrived = raw.checkedIn ? seats : 0;
   }
   arrived = Math.max(0, Math.min(seats, arrived));
-  return {...raw, seats, arrived};
+  return {...raw, seats, arrived, memo: raw.memo || ''};
 }
 
 function extractSeats(text){
@@ -212,6 +235,7 @@ function render(){
         <div class="info">
           <div class="name">${escapeHtml(g.name)}${g.source==='walkin'?'<span class="badge walkin">当日受付</span>':''}</div>
           <div class="sub">${escapeHtml(g.furigana||'')}${g.seats>1?`　予約${g.seats}名`:''}</div>
+          <button type="button" class="memo-btn${g.memo?' has':''}" data-memo="${escapeHtml(g.id)}">${g.memo ? escapeHtml(g.memo) : '＋ メモを追加'}</button>
         </div>
         ${g.seats>1 ? `
         <div class="stepper">
@@ -246,6 +270,9 @@ function render(){
         setArrived(e.currentTarget.dataset.id, e.currentTarget.checked ? 1 : 0);
       });
     });
+    listEl.querySelectorAll('.memo-btn').forEach(btn=>{
+      btn.addEventListener('click', e=>openMemo(e.currentTarget.dataset.memo));
+    });
   }
 
   // ウォークインフォームの公演回選択肢
@@ -268,6 +295,25 @@ function setArrived(id, value){
   const next = Math.max(0, Math.min(g.seats, value));
   if(next === g.arrived) return;
   g.arrived = next;
+  render();
+}
+
+// ---- メモ ----
+function openMemo(id){
+  const g = guests.find(x=>x.id===id);
+  if(!g) return;
+  memoTargetId = id;
+  document.getElementById('memoTitle').textContent = `メモ：${g.name}`;
+  document.getElementById('memoText').value = g.memo || '';
+  document.getElementById('memoDialog').showModal();
+}
+
+function submitMemo(e){
+  e.preventDefault();
+  const g = guests.find(x=>x.id===memoTargetId);
+  if(g) g.memo = document.getElementById('memoText').value.trim();
+  memoTargetId = null;
+  document.getElementById('memoDialog').close();
   render();
 }
 
@@ -301,9 +347,14 @@ async function handleImport(file){
       statusEl.textContent = 'インポートできるデータが見つかりませんでした。';
       return;
     }
+    // 再インポートしてもメモが消えないよう、公演回＋名前＋フリガナが一致する既存のメモを引き継ぐ
+    const memoKey = g => [g.performanceId, g.name, g.furigana].join('|');
+    const oldMemos = {};
+    guests.filter(g=>g.source==='reserved' && g.memo).forEach(g=>{ oldMemos[memoKey(g)] = g.memo; });
+
     // 既存の予約データ（当日受付は除く）を入れ替える
     guests = guests.filter(g=>g.source!=='reserved').concat(
-      newGuests.map((g,i)=>normalizeGuest({...g, id:'local-'+Date.now()+'-'+i}))
+      newGuests.map((g,i)=>normalizeGuest({...g, memo: oldMemos[memoKey(g)] || '', id:'local-'+Date.now()+'-'+i}))
     );
     render();
     statusEl.textContent = `${newGuests.length}件の予約を取り込みました。`;
@@ -331,6 +382,7 @@ function submitWalkin(e){
     performanceId: document.getElementById('wPerf').value || '未指定',
     source: 'walkin',
     arrived: seats,
+    memo: document.getElementById('wMemo').value.trim(),
   };
   guests.push(normalizeGuest({...g, id:'local-'+Date.now()}));
   render();
@@ -344,7 +396,7 @@ function exportWalkins(){
   if(walkins.length===0){ alert('当日受付のデータがまだありません。'); return; }
   const rows = walkins.map(g=>({
     'お名前': g.name, 'フリガナ': g.furigana, 'メールアドレス': g.email,
-    '人数': g.seats, '公演回': g.performanceId,
+    '人数': g.seats, '公演回': g.performanceId, 'メモ': g.memo || '',
   }));
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
@@ -370,6 +422,11 @@ function init(){
   });
   document.getElementById('wCancel').addEventListener('click', ()=>document.getElementById('walkinDialog').close());
   document.getElementById('walkinForm').addEventListener('submit', submitWalkin);
+  document.getElementById('memoCancel').addEventListener('click', ()=>{
+    memoTargetId = null;
+    document.getElementById('memoDialog').close();
+  });
+  document.getElementById('memoForm').addEventListener('submit', submitMemo);
   document.getElementById('exportBtn').addEventListener('click', exportWalkins);
   document.getElementById('clearWalkinBtn').addEventListener('click', ()=>{
     const n = guests.filter(g=>g.source==='walkin').length;
