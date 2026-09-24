@@ -118,10 +118,10 @@ dialog::backdrop{background:rgba(0,0,0,.4);}
     <h3>予約なしのお客様</h3>
     <label>お名前 *</label>
     <input type="text" id="wName" required>
-    <label>ふりがな</label>
-    <input type="text" id="wFurigana">
-    <label>メールアドレス</label>
-    <input type="email" id="wEmail">
+    <label>ふりがな *</label>
+    <input type="text" id="wFurigana" required>
+    <label>メールアドレス *</label>
+    <input type="email" id="wEmail" required>
     <label>人数</label>
     <input type="number" id="wSeats" value="1" min="1">
     <label>公演回 *</label>
@@ -316,12 +316,17 @@ async function handleImport(file){
 function submitWalkin(e){
   e.preventDefault();
   const name = document.getElementById('wName').value.trim();
-  if(!name) return;
+  const furigana = document.getElementById('wFurigana').value.trim();
+  const email = document.getElementById('wEmail').value.trim();
+  if(!name || !furigana || !email){
+    alert('お名前・ふりがな・メールアドレスを入力してください。');
+    return;
+  }
   const seats = parseInt(document.getElementById('wSeats').value,10) || 1;
   const g = {
     name,
-    furigana: document.getElementById('wFurigana').value.trim(),
-    email: document.getElementById('wEmail').value.trim(),
+    furigana,
+    email,
     seats,
     performanceId: document.getElementById('wPerf').value || '未指定',
     source: 'walkin',
