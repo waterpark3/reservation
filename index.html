@@ -154,6 +154,11 @@ dialog::backdrop{background:rgba(0,0,0,.4);}
 <dialog id="memoDialog">
   <form class="dform" method="dialog" id="memoForm">
     <h3 id="memoTitle">メモ</h3>
+    <div id="memoEmailWrap" style="display:none;">
+      <label>メールアドレス</label>
+      <input type="text" id="memoEmail" inputmode="email" pattern="[^@\s]+@[^@\s]+\.[^@\s]+" title="メールアドレスの形式で入力してください" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </div>
+    <label>メモ</label>
     <textarea id="memoText" rows="5" placeholder="例：車椅子席を希望、開演に遅れて来場予定"></textarea>
     <label>画像（最大5枚）</label>
     <div class="thumbs" id="memoImages"></div>
@@ -339,6 +344,13 @@ function openMemo(id){
   memoTargetId = id;
   memoDraftImages = [...g.images];
   document.getElementById('memoTitle').textContent = `メモ・画像：${g.name}`;
+  const emailWrap = document.getElementById('memoEmailWrap');
+  if(g.source==='walkin'){
+    emailWrap.style.display = '';
+    document.getElementById('memoEmail').value = g.email || '';
+  } else {
+    emailWrap.style.display = 'none';
+  }
   document.getElementById('memoText').value = g.memo || '';
   renderMemoImages();
   document.getElementById('memoDialog').showModal();
@@ -348,6 +360,15 @@ function submitMemo(e){
   e.preventDefault();
   const g = guests.find(x=>x.id===memoTargetId);
   if(g){
+    if(g.source==='walkin'){
+      const emailInput = document.getElementById('memoEmail');
+      if(!emailInput.checkValidity()){
+        alert('メールアドレスの形式をご確認ください。');
+        emailInput.focus();
+        return;
+      }
+      g.email = emailInput.value.trim();
+    }
     g.memo = document.getElementById('memoText').value.trim();
     g.images = [...memoDraftImages];
   }
