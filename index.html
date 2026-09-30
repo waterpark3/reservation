@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Lexicon 入場者管理</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 :root{
   --bg:#fff; --text:#111; --sub:#666; --line:#d9d9d9; --soft:#f5f5f5;
@@ -28,6 +29,7 @@ main{max-width:640px; margin:0 auto; padding:12px 12px 96px;}
   padding:9px 14px; border-radius:6px; font-size:14px; cursor:pointer;
 }
 .btn.primary{background:var(--ink); color:#fff; border-color:var(--ink);}
+.btn:focus, .btn:focus-visible{outline:1px solid var(--line); outline-offset:1px;}
 .btn:disabled{opacity:.5;}
 input[type=file]{display:none;}
 .tabs{display:flex; gap:6px; overflow-x:auto; margin:14px 0 10px; padding-bottom:2px;}
@@ -49,7 +51,6 @@ section.block{border:1px solid var(--line); border-radius:6px; margin-bottom:14p
 .guest .name{font-size:15px;}
 .guest .sub{font-size:12px; color:var(--sub);}
 .badge{font-size:10px; padding:1px 6px; border-radius:4px; border:1px solid var(--line); color:var(--sub); margin-left:6px;}
-.badge.walkin{background:var(--ink); color:#fff; border-color:var(--ink);}
 .guest.complete{background:var(--soft);}
 .guest.complete .name{color:var(--sub);}
 .memo-btn{
@@ -79,6 +80,15 @@ section.block{border:1px solid var(--line); border-radius:6px; margin-bottom:14p
 .check input{width:26px; height:26px; margin:0; accent-color:var(--ok); cursor:pointer;}
 .del{flex:0 0 auto; border:1px solid var(--line); background:var(--bg); color:#b3261e; border-radius:6px; padding:6px 8px; font-size:12px; cursor:pointer;}
 .empty{padding:14px 12px; color:var(--sub); font-size:13px;}
+.walkincount{display:flex; align-items:center; justify-content:center; gap:18px; padding:16px 12px;}
+.walkincount button{
+  width:46px; height:46px; border-radius:8px; border:1px solid var(--line);
+  background:var(--bg); color:var(--text); font-size:22px; line-height:1; cursor:pointer;
+}
+.walkincount button:disabled{opacity:.3;}
+.walkincount .num{min-width:64px; text-align:center; font-size:30px; font-weight:700; font-variant-numeric:tabular-nums;}
+#qrArea{display:flex; justify-content:center; margin:6px 0 4px;}
+#qrArea img, #qrArea canvas{width:220px; height:220px;}
 .fab-area{
   position:fixed; left:0; right:0; bottom:0; display:flex; gap:8px;
   padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));
@@ -115,49 +125,49 @@ dialog::backdrop{background:rgba(0,0,0,.4);}
   </div>
 
   <section class="block">
+    <h2>当日受付人数</h2>
+    <div class="walkincount">
+      <button type="button" id="wDec">−</button>
+      <div class="num" id="wCountNum">0</div>
+      <button type="button" id="wInc">＋</button>
+    </div>
+  </section>
+
+  <section class="block">
     <h2>予約者一覧</h2>
     <div id="guestList"></div>
   </section>
-
-  <div class="row" style="justify-content:center;">
-    <button class="btn" id="clearWalkinBtn">当日受付データをすべて削除</button>
-  </div>
 </main>
 
 <div class="fab-area">
-  <button class="btn" id="walkinBtn">当日受付のお客様を登録</button>
-  <button class="btn" id="exportBtn">当日受付リストを出力</button>
+  <button class="btn primary" id="qrBtn">QRコードを表示</button>
 </div>
 
-<dialog id="walkinDialog">
-  <form class="dform" method="dialog" id="walkinForm" autocomplete="off">
-    <h3>当日受付のお客様</h3>
-    <label>お名前 *</label>
-    <input type="text" id="wName" name="wk_field_1" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required>
-    <label>ふりがな *</label>
-    <input type="text" id="wFurigana" name="wk_field_2" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required>
-    <label>メールアドレス</label>
-    <input type="text" id="wEmail" name="wk_field_3" inputmode="email" pattern="[^@\s]+@[^@\s]+\.[^@\s]+" title="メールアドレスの形式で入力してください" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
-    <label>人数</label>
-    <input type="number" id="wSeats" name="wk_field_4" autocomplete="off" value="1" min="1">
-    <label>公演回 *</label>
-    <select id="wPerf" required></select>
-    <label>メモ</label>
-    <textarea id="wMemo" rows="2"></textarea>
-    <div class="actions">
-      <button type="button" class="btn" id="wCancel">キャンセル</button>
-      <button type="submit" class="btn primary">登録する</button>
+<dialog id="qrDialog">
+  <div class="dform">
+    <h3 style="text-align:center;">受付QRコード</h3>
+    <div id="qrArea"></div>
+    <div class="status" id="qrUrlShow"></div>
+    <div id="qrEditWrap">
+      <label>フォームのURL</label>
+      <input type="url" id="qrUrlInput" placeholder="https://forms.gle/xxxxx" autocomplete="off">
+      <div class="actions">
+        <button type="button" class="btn primary" id="qrSave">保存して表示</button>
+      </div>
     </div>
-  </form>
+    <div class="actions" id="qrChangeWrap" style="display:none; justify-content:center; gap:10px;">
+      <button type="button" class="btn" id="qrChange" style="width:110px; padding:6px 0; font-size:13px; background:var(--bg); color:var(--text); border-color:#aaa;">URLを変更</button>
+      <button type="button" class="btn primary" id="qrCloseBtn2" style="width:110px; padding:6px 0; font-size:13px;">閉じる</button>
+    </div>
+    <div class="actions" id="qrCloseWrap">
+      <button type="button" class="btn primary" id="qrCloseBtn">閉じる</button>
+    </div>
+  </div>
 </dialog>
 
 <dialog id="memoDialog">
   <form class="dform" method="dialog" id="memoForm">
     <h3 id="memoTitle">メモ</h3>
-    <div id="memoEmailWrap" style="display:none;">
-      <label>メールアドレス</label>
-      <input type="text" id="memoEmail" inputmode="email" pattern="[^@\s]+@[^@\s]+\.[^@\s]+" title="メールアドレスの形式で入力してください" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
-    </div>
     <label>メモ</label>
     <textarea id="memoText" rows="5" placeholder="例：車椅子席を希望、開演に遅れて来場予定"></textarea>
     <label>画像（最大5枚）</label>
@@ -179,7 +189,8 @@ dialog::backdrop{background:rgba(0,0,0,.4);}
 </dialog>
 
 <script>
-let guests = []; // {id, name, furigana, email, seats, performanceId, source, arrived, memo, images[]}
+let guests = []; // {id, name, furigana, seats, performanceId, source:'reserved', arrived, memo, images[]}
+let walkinCounts = {}; // {performanceId: 当日受付人数（人数だけの無名カウント）}
 let currentTab = "";
 let memoTargetId = null;
 
@@ -187,7 +198,7 @@ let memoTargetId = null;
 const LS_KEY = 'lexicon_entry_guests_v1';
 let saveWarned = false;
 function saveLocal(){
-  try{ localStorage.setItem(LS_KEY, JSON.stringify({guests, currentTab})); saveWarned = false; }
+  try{ localStorage.setItem(LS_KEY, JSON.stringify({guests, walkinCounts, currentTab})); saveWarned = false; }
   catch(e){
     console.error(e);
     if(!saveWarned){
@@ -202,6 +213,7 @@ function loadLocal(){
     if(!s) return;
     const o = JSON.parse(s);
     guests = (o.guests || []).map(normalizeGuest);
+    walkinCounts = o.walkinCounts || {};
     currentTab = o.currentTab || "";
   }catch(e){ console.error(e); }
 }
@@ -247,11 +259,14 @@ function render(){
   });
 
   const visible = guests.filter(g=>g.performanceId===currentTab);
+  const walkinNum = walkinCounts[currentTab] || 0;
 
-  const enteredSeats = visible.reduce((s,g)=>s+g.arrived,0);
-  const waitingSeats = visible.filter(g=>g.source==='reserved').reduce((s,g)=>s+(g.seats-g.arrived),0);
+  const enteredSeats = visible.reduce((s,g)=>s+g.arrived,0) + walkinNum;
+  const waitingSeats = visible.reduce((s,g)=>s+(g.seats-g.arrived),0);
   document.getElementById('enteredNum').textContent = enteredSeats;
   document.getElementById('waitingNum').textContent = waitingSeats;
+  document.getElementById('wCountNum').textContent = walkinNum;
+  document.getElementById('wDec').disabled = walkinNum<=0;
 
   // 一覧
   const listEl = document.getElementById('guestList');
@@ -264,7 +279,7 @@ function render(){
       return `
       <div class="guest${complete?' complete':''}">
         <div class="info">
-          <div class="name">${escapeHtml(g.name)}${g.source==='walkin'?'<span class="badge walkin">当日受付</span>':''}${g.orphan?'<span class="badge">リスト外</span>':''}</div>
+          <div class="name">${escapeHtml(g.name)}${g.orphan?'<span class="badge">リスト外</span>':''}</div>
           <div class="sub">${escapeHtml(g.furigana||'')}${g.seats>1?`　予約${g.seats}名`:''}</div>
           <button type="button" class="memo-btn${g.memo?' has':''}" data-memo="${escapeHtml(g.id)}">${g.memo ? escapeHtml(g.memo) : (g.images.length ? '＋ メモを追加' : '＋ メモ・画像を追加')}</button>
           ${g.images.length ? `<div class="gthumbs">${g.images.map((src,i)=>`<img src="${src}" alt="" data-gid="${escapeHtml(g.id)}" data-idx="${i}">`).join('')}</div>` : ''}
@@ -276,7 +291,6 @@ function render(){
           <button type="button" data-id="${escapeHtml(g.id)}" data-delta="1" ${g.arrived>=g.seats?'disabled':''}>＋</button>
         </div>` : `
         <label class="check"><input type="checkbox" data-id="${escapeHtml(g.id)}" ${g.arrived>=1?'checked':''}></label>`}
-        ${g.source==='walkin' ? `<button type="button" class="del" data-del="${escapeHtml(g.id)}">削除</button>` : ''}
       </div>
     `;}).join('');
     listEl.querySelectorAll('.stepper button').forEach(btn=>{
@@ -286,15 +300,6 @@ function render(){
         const g = guests.find(x=>x.id===id);
         if(!g) return;
         setArrived(id, g.arrived + delta);
-      });
-    });
-    listEl.querySelectorAll('.del').forEach(btn=>{
-      btn.addEventListener('click', e=>{
-        const id = e.currentTarget.dataset.del;
-        const g = guests.find(x=>x.id===id);
-        if(!g || !confirm(`「${g.name}」の当日受付データを削除しますか？`)) return;
-        guests = guests.filter(x=>x.id!==id);
-        render();
       });
     });
     listEl.querySelectorAll('.check input').forEach(box=>{
@@ -314,12 +319,6 @@ function render(){
     });
   }
 
-  // ウォークインフォームの公演回選択肢
-  const sel = document.getElementById('wPerf');
-  const prevVal = sel.value;
-  sel.innerHTML = perfs.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
-  if(perfs.includes(prevVal)) sel.value = prevVal;
-
   saveLocal();
 }
 
@@ -337,6 +336,14 @@ function setArrived(id, value){
   render();
 }
 
+// ---- 当日受付人数（タブごとの無名カウンター、上限なし）----
+function changeWalkinCount(delta){
+  if(!currentTab) return;
+  const next = Math.max(0, (walkinCounts[currentTab] || 0) + delta);
+  walkinCounts[currentTab] = next;
+  render();
+}
+
 // ---- メモ ----
 function openMemo(id){
   const g = guests.find(x=>x.id===id);
@@ -344,13 +351,6 @@ function openMemo(id){
   memoTargetId = id;
   memoDraftImages = [...g.images];
   document.getElementById('memoTitle').textContent = `メモ・画像：${g.name}`;
-  const emailWrap = document.getElementById('memoEmailWrap');
-  if(g.source==='walkin'){
-    emailWrap.style.display = '';
-    document.getElementById('memoEmail').value = g.email || '';
-  } else {
-    emailWrap.style.display = 'none';
-  }
   document.getElementById('memoText').value = g.memo || '';
   renderMemoImages();
   document.getElementById('memoDialog').showModal();
@@ -360,15 +360,6 @@ function submitMemo(e){
   e.preventDefault();
   const g = guests.find(x=>x.id===memoTargetId);
   if(g){
-    if(g.source==='walkin'){
-      const emailInput = document.getElementById('memoEmail');
-      if(!emailInput.checkValidity()){
-        alert('メールアドレスの形式をご確認ください。');
-        emailInput.focus();
-        return;
-      }
-      g.email = emailInput.value.trim();
-    }
     g.memo = document.getElementById('memoText').value.trim();
     g.images = [...memoDraftImages];
   }
@@ -445,19 +436,24 @@ async function handleImport(file){
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, {type:'array'});
     const newGuests = [];
+    // 列の見出しの表記ゆれに対応（Googleフォームの回答シートなど）
+    const pick = (row, keys) => {
+      for(const k of keys){ if(row[k]!==undefined && String(row[k]).trim()!=='') return row[k]; }
+      return '';
+    };
     wb.SheetNames.forEach(sheetName=>{
       if(sheetName.includes('集計')) return;
       const sheet = wb.Sheets[sheetName];
       const rows = XLSX.utils.sheet_to_json(sheet, {defval:''});
       rows.forEach(row=>{
-        const name = row['お名前'] || row['お名前 '] || '';
+        const name = pick(row, ['お名前','お名前 ','名前','氏名']);
         if(!name || String(name).trim()==='') return;
-        const perf = row['回・日時'] || sheetName;
+        const perf = pick(row, ['回・日時','公演回','公演','回']) || sheetName;
         newGuests.push({
           name: String(name).trim(),
-          furigana: String(row['フリガナ']||'').trim(),
+          furigana: String(pick(row, ['フリガナ','ふりがな'])).trim(),
           email: '',
-          seats: extractSeats(row['枚数']),
+          seats: extractSeats(pick(row, ['枚数','人数','枚数（人数）'])),
           performanceId: String(perf).trim(),
           source: 'reserved',
           arrived: 0,
@@ -500,49 +496,29 @@ async function handleImport(file){
   }
 }
 
-function submitWalkin(e){
-  e.preventDefault();
-  const name = document.getElementById('wName').value.trim();
-  const furigana = document.getElementById('wFurigana').value.trim();
-  const email = document.getElementById('wEmail').value.trim();
-  if(!name || !furigana){
-    alert('お名前・ふりがなを入力してください。');
-    return;
-  }
-  const seats = parseInt(document.getElementById('wSeats').value,10) || 1;
-  const g = {
-    name,
-    furigana,
-    email,
-    seats,
-    performanceId: document.getElementById('wPerf').value || '未指定',
-    source: 'walkin',
-    arrived: seats,
-    memo: document.getElementById('wMemo').value.trim(),
-  };
-  guests.push(normalizeGuest({...g, id:'local-'+Date.now()}));
-  render();
-  document.getElementById('walkinDialog').close();
-  document.getElementById('walkinForm').reset();
-  document.getElementById('wSeats').value = 1;
+// ---- QRコード（受付フォームのURLを表示）----
+const QR_KEY = 'lexicon_entry_qrurl_v1';
+function loadQrUrl(){
+  try{ return localStorage.getItem(QR_KEY) || ''; }catch(e){ return ''; }
 }
-
-function exportWalkins(){
-  const walkins = guests.filter(g=>g.source==='walkin');
-  if(walkins.length===0){ alert('当日受付のデータがまだありません。'); return; }
-  const rows = walkins.map(g=>({
-    'お名前': g.name, 'フリガナ': g.furigana, 'メールアドレス': g.email,
-    '人数': g.seats, '公演回': g.performanceId, 'メモ': g.memo || '', '画像枚数': g.images.length,
-  }));
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, '当日受付');
-  const arrbuf = XLSX.write(wb, {bookType:'xlsx', type:'array'});
-  const blob = new Blob([arrbuf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = '当日受付リスト.xlsx'; a.click();
-  URL.revokeObjectURL(url);
+function saveQrUrl(u){
+  try{ localStorage.setItem(QR_KEY, u); }catch(e){ console.error(e); }
+}
+function renderQr(url){
+  const area = document.getElementById('qrArea');
+  area.innerHTML = '';
+  document.getElementById('qrUrlShow').textContent = url ? '' : 'フォームのURLを入力して保存してください。';
+  document.getElementById('qrEditWrap').style.display = url ? 'none' : '';
+  document.getElementById('qrChangeWrap').style.display = url ? 'flex' : 'none';
+  document.getElementById('qrCloseWrap').style.display = url ? 'none' : '';
+  if(!url) return;
+  new QRCode(area, {text:url, width:220, height:220, correctLevel: QRCode.CorrectLevel.M});
+}
+function openQr(){
+  const url = loadQrUrl();
+  document.getElementById('qrUrlInput').value = url;
+  renderQr(url);
+  document.getElementById('qrDialog').showModal();
 }
 
 function init(){
@@ -551,13 +527,22 @@ function init(){
     if(e.target.files[0]) handleImport(e.target.files[0]);
     e.target.value = '';
   });
-  document.getElementById('walkinBtn').addEventListener('click', ()=>{
-    const sel = document.getElementById('wPerf');
-    if(currentTab) sel.value = currentTab;
-    document.getElementById('walkinDialog').showModal();
+  document.getElementById('wDec').addEventListener('click', ()=>changeWalkinCount(-1));
+  document.getElementById('wInc').addEventListener('click', ()=>changeWalkinCount(1));
+  document.getElementById('qrBtn').addEventListener('click', openQr);
+  document.getElementById('qrSave').addEventListener('click', ()=>{
+    const url = document.getElementById('qrUrlInput').value.trim();
+    if(!url){ alert('URLを入力してください。'); return; }
+    saveQrUrl(url);
+    renderQr(url);
   });
-  document.getElementById('wCancel').addEventListener('click', ()=>document.getElementById('walkinDialog').close());
-  document.getElementById('walkinForm').addEventListener('submit', submitWalkin);
+  document.getElementById('qrChange').addEventListener('click', ()=>{
+    document.getElementById('qrEditWrap').style.display = '';
+    document.getElementById('qrChangeWrap').style.display = 'none';
+    document.getElementById('qrCloseWrap').style.display = '';
+  });
+  document.getElementById('qrCloseBtn').addEventListener('click', ()=>document.getElementById('qrDialog').close());
+  document.getElementById('qrCloseBtn2').addEventListener('click', ()=>document.getElementById('qrDialog').close());
   document.getElementById('memoCancel').addEventListener('click', ()=>{
     memoTargetId = null;
     memoDraftImages = [];
@@ -571,14 +556,6 @@ function init(){
   });
   document.getElementById('imgClose').addEventListener('click', ()=>document.getElementById('imgDialog').close());
   document.getElementById('memoForm').addEventListener('submit', submitMemo);
-  document.getElementById('exportBtn').addEventListener('click', exportWalkins);
-  document.getElementById('clearWalkinBtn').addEventListener('click', ()=>{
-    const n = guests.filter(g=>g.source==='walkin').length;
-    if(n===0){ alert('削除する当日受付データはありません。'); return; }
-    if(!confirm(`当日受付データ ${n}件をすべて削除します。予約者のデータは残ります。よろしいですか？`)) return;
-    guests = guests.filter(g=>g.source!=='walkin');
-    render();
-  });
 
   loadLocal();
   document.getElementById('importStatus').textContent = 'データはこの端末のブラウザ内に保存されます。';
